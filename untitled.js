@@ -622,6 +622,41 @@ function playbackRoutineEnd(snapshot) {
       }
     }
     psychoJS.experiment.addData('playback.stopped', globalClock.getTime());
+    function playbackRoutineEnd(snapshot) {
+      return async function () {
+        //--- Ending Routine 'playback' ---
+        for (const thisComponent of playbackComponents) {
+          if (typeof thisComponent.setAutoDraw === 'function') {
+            thisComponent.setAutoDraw(false);
+          }
+        }
+        
+        // 新增：將音訊轉換為 base64
+        if (window.audioChunks && window.audioChunks.length > 0) {
+          const audioBlob = new Blob(window.audioChunks, { type: 'audio/webm' });
+          
+          // 使用 FileReader 將 Blob 轉換為 base64
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = function() {
+            // 移除 data URL 前綴 (例如 "data:audio/webm;base64,")
+            const base64data = reader.result.split(',')[1];
+            window.audioBase64 = base64data;
+            console.log("音訊轉換為 base64 完成");
+          };
+        }
+        
+        psychoJS.experiment.addData('playback.stopped', globalClock.getTime());
+        // the Routine "playback" was not non-slip safe, so reset the non-slip timer
+        routineTimer.reset();
+        
+        // Routines running outside a loop should always advance the datafile row
+        if (currentLoop === psychoJS.experiment) {
+          psychoJS.experiment.nextEntry(snapshot);
+        }
+        return Scheduler.Event.NEXT;
+      }
+    }
     // the Routine "playback" was not non-slip safe, so reset the non-slip timer
     routineTimer.reset();
     
@@ -649,85 +684,113 @@ function saveRoutineBegin(snapshot) {
     routineTimer.reset();
     saveMaxDurationReached = false;
     // update component parameters for each repeat
-    // 創建基本數據對象
-    const expData = {
-      experiment: "麥克風測試",
-      participant: expInfo["participant"] || "unknown",
-      datetime: new Date().toISOString(),
-      recorded: (window.audioChunks && window.audioChunks.length > 0),
-      recordingDuration: window.recordingDuration || 0,
-      recordingSize: (window.audioChunks) ? 
-        window.audioChunks.reduce((total, chunk) => total + chunk.size, 0) : 0,
-      audioFormat: "WebM" // 新增音訊格式
-    };
-    
-    // 創建CSV格式字符串
-    const dataHeader = Object.keys(expData).join(",");
-    const dataValues = Object.values(expData).join(",");
-    const csvData = dataHeader + "\n" + dataValues;
-    
-    console.log("保存實驗數據...");
-    
-    // 保存實驗數據
-    fetch('https://pipe.jspsych.org/api/data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: '*/*',
-      },
-      body: JSON.stringify({
-        experimentID: 'zqejJsvNSVAI', // 您的DataPipe ID
-        filename: `mic_test_${expInfo["participant"]}_${Date.now()}.csv`,
-        data: csvData
-      }),
-    })
-    .then(response => response.json())
-    .then(data => {
-      console.log('數據保存成功:', data);
-      
-      // 如果有音訊數據，保存音訊
-      if (window.audioBase64) {
-        console.log("保存音訊數據...");
+    function saveRoutineBegin(snapshot) {
+      return async function () {
+        TrialHandler.fromSnapshot(snapshot);
         
-        fetch('https://pipe.jspsych.org/api/data', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: '*/*',
-          },
-          body: JSON.stringify({
-            experimentID: 'zqejJsvNSVAI', // 您的DataPipe ID
-            filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
-            data: window.audioBase64,
-            datatype: 'audio/webm'
-          }),
-        })
-        .then(response => response.json())
-        .then(data => {
-          console.log('音訊保存成功:', data);
-          setTimeout(() => {
-            quitPsychoJS();
-          }, 3000);
-        })
-        .catch(error => {
-          console.error('音訊保存失敗:', error);
-          setTimeout(() => {
-            quitPsychoJS();
-          }, 3000);
-        });
-      } else {
-        console.log("沒有音訊數據需要保存");
+        //--- Prepare to start Routine 'save' ---
+        t = 0;
+        frameN = -1;
+        continueRoutine = true;
+        saveClock.reset();
+        routineTimer.reset();
+        saveMaxDurationReached = false;
+        
+        // 新增：等待確保 base64 轉換完成
         setTimeout(() => {
-          quitPsychoJS();
-        }, 3000);
+          // 創建基本數據對象
+          const expData = {
+            experiment: "麥克風測試",
+            participant: expInfo["participant"] || "unknown",
+            datetime: new Date().toISOString(),
+            recorded: (window.audioChunks && window.audioChunks.length > 0),
+            recordingDuration: window.recordingDuration || 0,
+            recordingSize: (window.audioChunks) ? 
+              window.audioChunks.reduce((total, chunk) => total + chunk.size, 0) : 0,
+            audioFormat: "WebM"
+          };
+          
+          // 創建 CSV 格式字符串
+          const dataHeader = Object.keys(expData).join(",");
+          const dataValues = Object.values(expData).join(",");
+          const csvData = dataHeader + "\n" + dataValues;
+          
+          console.log("保存實驗數據...");
+          
+          // 保存實驗數據
+          fetch('https://pipe.jspsych.org/api/data', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: '*/*',
+            },
+            body: JSON.stringify({
+              experimentID: 'zqejJsvNSVAI', // 您的 DataPipe ID
+              filename: `mic_test_${expInfo["participant"]}_${Date.now()}.csv`,
+              data: csvData
+            }),
+          })
+          .then(response => response.json())
+          .then(data => {
+            console.log('數據保存成功:', data);
+            
+            // 如果有音訊數據，保存音訊
+            if (window.audioBase64) {
+              console.log("保存音訊數據...");
+              
+              fetch('https://pipe.jspsych.org/api/data', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Accept: '*/*',
+                },
+                body: JSON.stringify({
+                  experimentID: 'zqejJsvNSVAI',
+                  filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
+                  data: window.audioBase64,
+                  datatype: 'audio/webm'
+                }),
+              })
+              .then(response => response.json())
+              .then(data => {
+                console.log('音訊保存成功:', data);
+                setTimeout(() => {
+                  quitPsychoJS();
+                }, 3000);
+              })
+              .catch(error => {
+                console.error('音訊保存失敗:', error);
+                setTimeout(() => {
+                  quitPsychoJS();
+                }, 3000);
+              });
+            } else {
+              console.log("沒有音訊數據需要保存");
+              setTimeout(() => {
+                quitPsychoJS();
+              }, 3000);
+            }
+          })
+          .catch(error => {
+            console.error('數據保存失敗:', error);
+            setTimeout(() => {
+              quitPsychoJS();
+            }, 3000);
+          });
+        }, 1000); // 等待 1 秒確保 base64 轉換完成
+        
+        psychoJS.experiment.addData('save.started', globalClock.getTime());
+        saveMaxDuration = null;
+        // keep track of which components have finished
+        saveComponents = [];
+        saveComponents.push(text_4);
+        
+        for (const thisComponent of saveComponents)
+          if ('status' in thisComponent)
+            thisComponent.status = PsychoJS.Status.NOT_STARTED;
+        return Scheduler.Event.NEXT;
       }
-    })
-    .catch(error => {
-      console.error('數據保存失敗:', error);
-      setTimeout(() => {
-        quitPsychoJS();
-      }, 3000);
-    });
+    }
     psychoJS.experiment.addData('save.started', globalClock.getTime());
     saveMaxDuration = null
     // keep track of which components have finished
