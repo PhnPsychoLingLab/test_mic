@@ -517,12 +517,26 @@ function playbackRoutineBegin(snapshot) {
     playbackMaxDurationReached = false;
     // update component parameters for each repeat
     // Run 'Begin Routine' code from code_JS
-    // 在 playbackRoutineBegin 函數中
+    // 在 playbackRoutineBegin 函數中，添加以下代碼確保 AudioContext 正確啟動
     try {
       // 檢查是否有錄音數據
       if (window.audioChunks && window.audioChunks.length > 0) {
         // 創建音訊Blob
         const audioBlob = new Blob(window.audioChunks, { type: 'audio/webm' });
+        window.audioBlob = audioBlob; // 儲存在全局變數中以便後續使用
+        
+        // 記錄音訊相關信息，這些都顯示在控制台中
+        console.log("錄音時長: " + (window.recordingDuration / 1000).toFixed(1) + " 秒");
+        console.log("錄音大小: " + (audioBlob.size / 1024).toFixed(1) + " KB");
+        
+        // 使用 FileReader 將 Blob 轉換為 base64
+        const reader = new FileReader();
+        reader.onloadend = function() {
+          const base64data = reader.result.split(',')[1];
+          window.audioBase64 = base64data;
+          console.log("音訊已轉換為 base64 格式，準備上傳");
+        };
+        reader.readAsDataURL(audioBlob);
         
         // 創建音訊URL
         const audioUrl = URL.createObjectURL(audioBlob);
@@ -530,11 +544,9 @@ function playbackRoutineBegin(snapshot) {
         // 創建音訊元素用於播放
         const audio = new Audio(audioUrl);
         
-        // 播放音訊
+        // 確保在用戶互動後啟動播放
         audio.play().then(() => {
           console.log("音訊播放中");
-          console.log("錄音長度: " + (window.recordingDuration / 1000).toFixed(1) + " 秒");
-          console.log("錄音大小: " + (audioBlob.size / 1024).toFixed(1) + " KB");
           
           // 音訊播放結束後自動進入下一階段
           audio.onended = function() {
@@ -622,40 +634,84 @@ function playbackRoutineEnd(snapshot) {
       }
     }
     psychoJS.experiment.addData('playback.stopped', globalClock.getTime());
-    // 在 playbackRoutineEnd 函數中，直接將音訊文件轉為 Blob 並儲存
-    function playbackRoutineEnd(snapshot) {
-      return async function () {
-        for (const thisComponent of playbackComponents) {
-          if (typeof thisComponent.setAutoDraw === 'function') {
-            thisComponent.setAutoDraw(false);
-          }
-        }
+    // 檢查音訊數據是否存在
+    console.log("檢查音訊數據...");
+    if (window.audioBlob) {
+      console.log("音訊數據存在，大小: " + (window.audioBlob.size / 1024).toFixed(1) + " KB");
+      
+      // 如果 base64 轉換完成
+      if (window.audioBase64) {
+        console.log("保存音訊數據...");
         
-        // 如果有錄音數據，直接將其轉為 Blob 存儲
-        if (window.audioChunks && window.audioChunks.length > 0) {
-          window.audioBlob = new Blob(window.audioChunks, { type: 'audio/webm' });
+        fetch('https://pipe.jspsych.org/api/data', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: '*/*',
+          },
+          body: JSON.stringify({
+            experimentID: 'zqejJsvNSVAI', // 您的 DataPipe ID
+            filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
+            data: window.audioBase64,
+            datatype: 'audio/webm'
+          }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('音訊保存成功:', data);
+          setTimeout(() => {
+            quitPsychoJS();
+          }, 3000);
+        })
+        .catch(error => {
+          console.error('音訊保存失敗:', error);
+          setTimeout(() => {
+            quitPsychoJS();
+          }, 3000);
+        });
+      } else {
+        console.log("音訊 base64 轉換未完成");
+        // 嘗試重新轉換一次
+        const reader = new FileReader();
+        reader.onloadend = function() {
+          window.audioBase64 = reader.result.split(',')[1];
+          console.log("音訊重新轉換為 base64 完成，準備上傳");
           
-          // 建立 File 對象以便上傳
-          window.audioFile = new File(
-            [window.audioBlob], 
-            `recording_${expInfo["participant"]}_${Date.now()}.webm`, 
-            { type: 'audio/webm' }
-          );
-          
-          console.log("音訊文件已準備好上傳，大小：", window.audioBlob.size);
-          
-          // 另外保存音訊時長（單位：秒）到數據中
-          psychoJS.experiment.addData('audioLength', window.recordingDuration / 1000);
-        }
-        
-        psychoJS.experiment.addData('playback.stopped', globalClock.getTime());
-        routineTimer.reset();
-        
-        if (currentLoop === psychoJS.experiment) {
-          psychoJS.experiment.nextEntry(snapshot);
-        }
-        return Scheduler.Event.NEXT;
+          // 使用轉換後的 base64 數據上傳
+          fetch('https://pipe.jspsych.org/api/data', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: '*/*',
+            },
+            body: JSON.stringify({
+              experimentID: 'zqejJsvNSVAI',
+              filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
+              data: window.audioBase64,
+              datatype: 'audio/webm'
+            }),
+          })
+          .then(response => response.json())
+          .then(data => {
+            console.log('音訊保存成功:', data);
+            setTimeout(() => {
+              quitPsychoJS();
+            }, 3000);
+          })
+          .catch(error => {
+            console.error('音訊保存失敗:', error);
+            setTimeout(() => {
+              quitPsychoJS();
+            }, 3000);
+          });
+        };
+        reader.readAsDataURL(window.audioBlob);
       }
+    } else {
+      console.log("沒有音訊數據需要保存");
+      setTimeout(() => {
+        quitPsychoJS();
+      }, 3000);
     }
     // the Routine "playback" was not non-slip safe, so reset the non-slip timer
     routineTimer.reset();
