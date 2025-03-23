@@ -395,6 +395,7 @@ function recordRoutineBegin(snapshot) {
     window.recordingStartTime = Date.now();
     // 清空之前的錄音數據
     window.audioChunks = [];
+    
     // 如果有麥克風權限，創建新的MediaRecorder
     if (window.microphoneStream) {
       try {
@@ -422,34 +423,37 @@ function recordRoutineBegin(snapshot) {
         // 開始錄音並每秒收集一次數據
         window.mediaRecorder.start(1000);
         console.log("開始錄音");
-        
-        // 5秒後自動停止錄音並進入下一階段
-        setTimeout(() => {
-          if (window.mediaRecorder && window.mediaRecorder.state !== 'inactive') {
-            window.mediaRecorder.stop();
-            console.log("錄音自動停止");
-          }
-          // 記錄總錄音時間
-          window.recordingDuration = Date.now() - window.recordingStartTime;
-          // 1秒後進入下一階段
-          setTimeout(() => {
-            continueRoutine = false;
-          }, 1000);
-        }, 5000);
       } catch (error) {
         console.error("創建MediaRecorder時出錯:", error);
-        // 創建失敗也繼續實驗
-        setTimeout(() => {
-          continueRoutine = false;
-        }, 1000);
       }
     } else {
       console.error("無法取得麥克風串流");
-      // 沒有麥克風也繼續實驗
-      setTimeout(() => {
-        continueRoutine = false;
-      }, 1000);
     }
+    
+    // 簡化定時器設計 - 使用單一計時器
+    // 5秒後自動停止錄音並繼續
+    setTimeout(() => {
+      console.log("5秒時間到，準備結束錄音");
+      
+      // 嘗試停止錄音
+      if (window.mediaRecorder && window.mediaRecorder.state !== 'inactive') {
+        try {
+          window.mediaRecorder.stop();
+          console.log("錄音已停止");
+        } catch (e) {
+          console.error("停止錄音時出錯:", e);
+        }
+      }
+      
+      // 記錄總錄音時間
+      window.recordingDuration = Date.now() - window.recordingStartTime;
+      
+      // 無論錄音是否成功，都在0.5秒後繼續下一步
+      setTimeout(() => {
+        console.log("繼續到下一個常規");
+        continueRoutine = false;
+      }, 500);
+    }, 5000);
     psychoJS.experiment.addData('record.started', globalClock.getTime());
     recordMaxDuration = null
     // keep track of which components have finished
