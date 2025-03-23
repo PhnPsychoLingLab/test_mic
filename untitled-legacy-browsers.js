@@ -195,8 +195,16 @@ function introRoutineBegin(snapshot) {
     routineTimer.reset();
     introMaxDurationReached = false;
     // update component parameters for each repeat
-    // 在 intro routine 的代碼中
-    console.log("請求麥克風權限中...");
+    // 確保在用戶互動後（如點擊）請求麥克風權限
+    // 務必放在 introRoutineBegin 函數的開始處
+    console.log("等待用戶互動以請求麥克風權限...");
+    
+    // 將麥克風請求移到這裡，等待用戶點擊
+    mouse.clickReset();
+    mouse.mouseClock.reset();
+    
+    // 在控制台顯示更明確的提示
+    console.log("請點擊螢幕繼續並授予麥克風權限");
     
     // 初始化音頻記錄系統
     window.audioRecorder = {
@@ -528,6 +536,26 @@ function recordRoutineBegin(snapshot) {
     routineTimer.reset();
     recordMaxDurationReached = false;
     // update component parameters for each repeat
+    // 在 record routine 的開始
+    // 確保在用戶互動後創建 AudioContext
+    if (!window.audioContext) {
+      try {
+        window.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log("創建了 AudioContext");
+      } catch (e) {
+        console.error("創建 AudioContext 失敗:", e);
+      }
+    }
+    
+    // 如果 AudioContext 是暫停狀態，嘗試恢復
+    if (window.audioContext && window.audioContext.state === "suspended") {
+      window.audioContext.resume().then(() => {
+        console.log("AudioContext 已恢復");
+      }).catch(err => {
+        console.error("恢復 AudioContext 失敗:", err);
+      });
+    }
+    
     // 開始 WAV 錄音
     if (window.audioRecorder) {
       window.audioRecorder.startWavRecording();
