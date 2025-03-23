@@ -590,8 +590,8 @@ function playbackRoutineBegin(snapshot) {
     routineTimer.reset();
     playbackMaxDurationReached = false;
     // update component parameters for each repeat
-    // Run 'Begin Routine' code from code_JS
-    // 在 playbackRoutineBegin 函數中，添加以下代碼確保 AudioContext 正確啟動
+    // Run 'Begin Routine' code from code_playback
+    // 在 playbackRoutineBegin 函數中
     try {
       // 檢查是否有錄音數據
       if (window.audioChunks && window.audioChunks.length > 0) {
@@ -599,40 +599,69 @@ function playbackRoutineBegin(snapshot) {
         const audioBlob = new Blob(window.audioChunks, { type: 'audio/webm' });
         window.audioBlob = audioBlob; // 儲存在全局變數中以便後續使用
         
-        // 記錄音訊相關信息，這些都顯示在控制台中
+        // 記錄音訊相關信息
         console.log("錄音時長: " + (window.recordingDuration / 1000).toFixed(1) + " 秒");
         console.log("錄音大小: " + (audioBlob.size / 1024).toFixed(1) + " KB");
         
-        // 使用 FileReader 將 Blob 轉換為 base64
-        const reader = new FileReader();
-        reader.onloadend = function() {
-          const base64data = reader.result.split(',')[1];
-          window.audioBase64 = base64data;
-          console.log("音訊已轉換為 base64 格式，準備上傳");
-        };
-        reader.readAsDataURL(audioBlob);
+        // 創建音訊上下文用於 WAV 轉換
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         
-        // 創建音訊URL
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        // 創建音訊元素用於播放
-        const audio = new Audio(audioUrl);
-        
-        // 確保在用戶互動後啟動播放
-        audio.play().then(() => {
-          console.log("音訊播放中");
-          
-          // 音訊播放結束後自動進入下一階段
-          audio.onended = function() {
-            setTimeout(() => {
-              console.log("音訊播放結束");
+        // 將 WebM 轉換為 WAV
+        const fileReader = new FileReader();
+        fileReader.onload = async function(e) {
+          try {
+            // 解碼音訊數據
+            const arrayBuffer = e.target.result;
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            // 創建 WAV 格式數據
+            const wavBuffer = audioBufferToWav(audioBuffer);
+            window.wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+            
+            console.log("WebM 成功轉換為 WAV 格式");
+            console.log("WAV 大小: " + (window.wavBlob.size / 1024).toFixed(1) + " KB");
+            
+            // 轉換為 base64
+            const wavReader = new FileReader();
+            wavReader.onloadend = function() {
+              window.wavBase64 = wavReader.result.split(',')[1];
+              console.log("WAV 已轉換為 base64 格式，準備上傳");
+            };
+            wavReader.readAsDataURL(window.wavBlob);
+            
+            // 播放原始 WebM 錄音
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            
+            audio.onended = function() {
+              URL.revokeObjectURL(audioUrl);
+              setTimeout(() => {
+                console.log("音訊播放結束");
+                continueRoutine = false;
+              }, 500);
+            };
+            
+            audio.play().then(() => {
+              console.log("音訊播放中");
+            }).catch(error => {
+              console.error("音訊播放失敗:", error);
               continueRoutine = false;
-            }, 500);
-          };
-        }).catch(error => {
-          console.error("音訊播放失敗:", error);
-          continueRoutine = false;
-        });
+            });
+          } catch (error) {
+            console.error("音訊轉換或解碼時出錯:", error);
+            
+            // 如果轉換失敗，仍嘗試播放原始檔案
+            playOriginalAudio(audioBlob);
+          }
+        };
+        
+        fileReader.onerror = function() {
+          console.error("讀取檔案失敗");
+          // 嘗試播放原始檔案
+          playOriginalAudio(audioBlob);
+        };
+        
+        fileReader.readAsArrayBuffer(audioBlob);
       } else {
         console.log("沒有錄音數據可播放");
         continueRoutine = false;
@@ -640,6 +669,86 @@ function playbackRoutineBegin(snapshot) {
     } catch (error) {
       console.error("處理錄音時出錯:", error);
       continueRoutine = false;
+    }
+    
+    // 輔助函數: 播放原始音頻
+    function playOriginalAudio(blob) {
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      
+      audio.onended = function() {
+        URL.revokeObjectURL(audioUrl);
+        setTimeout(() => {
+          continueRoutine = false;
+        }, 500);
+      };
+      
+      audio.play().catch(error => {
+        console.error("原始音頻播放失敗:", error);
+        continueRoutine = false;
+      });
+    }
+    
+    // 輔助函數: 將 AudioBuffer 轉換為 WAV 格式
+    function audioBufferToWav(buffer) {
+      const numOfChan = buffer.numberOfChannels;
+      const length = buffer.length * numOfChan * 2;
+      const sampleRate = buffer.sampleRate;
+      
+      const buffer8 = new ArrayBuffer(44 + length);
+      const data = new DataView(buffer8);
+      let offset = 0;
+      
+      // RIFF 標識符
+      writeString(data, offset, 'RIFF'); offset += 4;
+      // RIFF 塊長度
+      data.setUint32(offset, 36 + length, true); offset += 4;
+      // RIFF 類型
+      writeString(data, offset, 'WAVE'); offset += 4;
+      // 格式塊標識符
+      writeString(data, offset, 'fmt '); offset += 4;
+      // 格式塊長度
+      data.setUint32(offset, 16, true); offset += 4;
+      // 音頻格式（PCM）
+      data.setUint16(offset, 1, true); offset += 2;
+      // 通道數
+      data.setUint16(offset, numOfChan, true); offset += 2;
+      // 採樣率
+      data.setUint32(offset, sampleRate, true); offset += 4;
+      // 位元率
+      data.setUint32(offset, sampleRate * 2 * numOfChan, true); offset += 4;
+      // 塊對齊
+      data.setUint16(offset, numOfChan * 2, true); offset += 2;
+      // 位深度
+      data.setUint16(offset, 16, true); offset += 2;
+      // 數據塊標識符
+      writeString(data, offset, 'data'); offset += 4;
+      // 數據塊長度
+      data.setUint32(offset, length, true); offset += 4;
+      
+      // 寫入PCM數據
+      const channelData = [];
+      for (let i = 0; i < numOfChan; i++) {
+        channelData.push(buffer.getChannelData(i));
+      }
+      
+      let sample;
+      for (let i = 0; i < buffer.length; i++) {
+        for (let channel = 0; channel < numOfChan; channel++) {
+          sample = Math.max(-1, Math.min(1, channelData[channel][i]));
+          sample = (sample < 0) ? sample * 32768 : sample * 32767;
+          data.setInt16(offset, sample, true); offset += 2;
+        }
+      }
+      
+      return buffer8;
+    }
+    
+    // 輔助函數: 將字符串寫入 DataView
+    function writeString(dataView, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        dataView.setUint8(offset + i, string.charCodeAt(i));
+      }
     }
     psychoJS.experiment.addData('playback.started', globalClock.getTime());
     playbackMaxDuration = null
@@ -708,14 +817,15 @@ function playbackRoutineEnd(snapshot) {
       }
     }
     psychoJS.experiment.addData('playback.stopped', globalClock.getTime());
+    // 在 playbackRoutineEnd 函數中
     // 檢查音訊數據是否存在
     console.log("檢查音訊數據...");
-    if (window.audioBlob) {
-      console.log("音訊數據存在，大小: " + (window.audioBlob.size / 1024).toFixed(1) + " KB");
+    if (window.wavBlob) {
+      console.log("WAV 音訊數據存在，大小: " + (window.wavBlob.size / 1024).toFixed(1) + " KB");
       
-      // 如果 base64 轉換完成
-      if (window.audioBase64) {
-        console.log("保存音訊數據...");
+      // 如果 WAV base64 轉換完成
+      if (window.wavBase64) {
+        console.log("保存 WAV 音訊數據...");
         
         fetch('https://pipe.jspsych.org/api/data', {
           method: 'POST',
@@ -724,32 +834,32 @@ function playbackRoutineEnd(snapshot) {
             Accept: '*/*',
           },
           body: JSON.stringify({
-            experimentID: 'zqejJsvNSVAI', // 您的 DataPipe ID
-            filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
-            data: window.audioBase64,
-            datatype: 'audio/webm'
+            experimentID: 'zqejJsvNSVAI',
+            filename: `mic_test_${expInfo["participant"]}_${Date.now()}.wav`, // 注意：使用 .wav 擴展名
+            data: window.wavBase64,
+            datatype: 'audio/wav' // 更改為 WAV MIME 類型
           }),
         })
         .then(response => response.json())
         .then(data => {
-          console.log('音訊保存成功:', data);
+          console.log('WAV 音訊保存成功:', data);
           setTimeout(() => {
             quitPsychoJS();
           }, 3000);
         })
         .catch(error => {
-          console.error('音訊保存失敗:', error);
+          console.error('WAV 音訊保存失敗:', error);
           setTimeout(() => {
             quitPsychoJS();
           }, 3000);
         });
       } else {
-        console.log("音訊 base64 轉換未完成");
+        console.log("WAV base64 轉換未完成");
         // 嘗試重新轉換一次
         const reader = new FileReader();
         reader.onloadend = function() {
-          window.audioBase64 = reader.result.split(',')[1];
-          console.log("音訊重新轉換為 base64 完成，準備上傳");
+          window.wavBase64 = reader.result.split(',')[1];
+          console.log("WAV 重新轉換為 base64 完成，準備上傳");
           
           // 使用轉換後的 base64 數據上傳
           fetch('https://pipe.jspsych.org/api/data', {
@@ -760,26 +870,63 @@ function playbackRoutineEnd(snapshot) {
             },
             body: JSON.stringify({
               experimentID: 'zqejJsvNSVAI',
-              filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
-              data: window.audioBase64,
-              datatype: 'audio/webm'
+              filename: `mic_test_${expInfo["participant"]}_${Date.now()}.wav`,
+              data: window.wavBase64,
+              datatype: 'audio/wav'
             }),
           })
           .then(response => response.json())
           .then(data => {
-            console.log('音訊保存成功:', data);
+            console.log('WAV 音訊保存成功:', data);
             setTimeout(() => {
               quitPsychoJS();
             }, 3000);
           })
           .catch(error => {
-            console.error('音訊保存失敗:', error);
+            console.error('WAV 音訊保存失敗:', error);
             setTimeout(() => {
               quitPsychoJS();
             }, 3000);
           });
         };
-        reader.readAsDataURL(window.audioBlob);
+        reader.readAsDataURL(window.wavBlob);
+      }
+    } else if (window.audioBlob) {
+      // 如果 WAV 轉換失敗，嘗試上傳原始 WebM
+      console.log("WAV 轉換失敗，嘗試上傳原始 WebM 檔案");
+      
+      if (window.audioBase64) {
+        fetch('https://pipe.jspsych.org/api/data', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: '*/*',
+          },
+          body: JSON.stringify({
+            experimentID: 'zqejJsvNSVAI',
+            filename: `mic_test_${expInfo["participant"]}_${Date.now()}.webm`,
+            data: window.audioBase64,
+            datatype: 'audio/webm'
+          }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('原始 WebM 音訊保存成功:', data);
+          setTimeout(() => {
+            quitPsychoJS();
+          }, 3000);
+        })
+        .catch(error => {
+          console.error('原始 WebM 音訊保存失敗:', error);
+          setTimeout(() => {
+            quitPsychoJS();
+          }, 3000);
+        });
+      } else {
+        console.log("無法獲取音訊 base64 數據");
+        setTimeout(() => {
+          quitPsychoJS();
+        }, 3000);
       }
     } else {
       console.log("沒有音訊數據需要保存");
