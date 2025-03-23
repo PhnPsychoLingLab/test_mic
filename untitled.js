@@ -690,44 +690,68 @@ function playbackRoutineBegin(snapshot) {
       });
     }
     
-    // 創建 WAV 文件
+    // 改進的 WAV 創建函數
     function createWAV(buffer) {
+      // 標準參數
       const numOfChan = buffer.numberOfChannels;
-      const length = buffer.length * numOfChan * 2;
       const sampleRate = buffer.sampleRate;
+      const bitsPerSample = 16; // 使用標準的 16 位樣本
+      const blockAlign = numOfChan * (bitsPerSample / 8);
+      const byteRate = sampleRate * blockAlign;
       
-      const buffer8 = new ArrayBuffer(44 + length);
+      // 計算原始 PCM 數據長度
+      const samples = buffer.length;
+      const dataSize = samples * numOfChan * (bitsPerSample / 8);
+      const fileSize = 36 + dataSize;
+      
+      // 記錄詳細信息到控制台
+      console.log("創建 WAV 文件:");
+      console.log("- 採樣率: " + sampleRate + " Hz");
+      console.log("- 通道數: " + numOfChan);
+      console.log("- 樣本數: " + samples);
+      console.log("- 位元數: " + bitsPerSample + " bits");
+      console.log("- 數據大小: " + (dataSize / 1024).toFixed(1) + " KB");
+      
+      // 創建完整的 WAV 文件
+      const buffer8 = new ArrayBuffer(44 + dataSize);
       const view = new DataView(buffer8);
       
-      // WAV 文件頭
-      writeString(view, 0, 'RIFF');
-      view.setUint32(4, 36 + length, true);
-      writeString(view, 8, 'WAVE');
-      writeString(view, 12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true);
-      view.setUint16(22, numOfChan, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * numOfChan * 2, true);
-      view.setUint16(32, numOfChan * 2, true);
-      view.setUint16(34, 16, true);
-      writeString(view, 36, 'data');
-      view.setUint32(40, length, true);
+      // 1. RIFF chunk descriptor
+      writeString(view, 0, 'RIFF');                     // ChunkID
+      view.setUint32(4, fileSize, true);                // ChunkSize
+      writeString(view, 8, 'WAVE');                     // Format
       
+      // 2. "fmt " sub-chunk
+      writeString(view, 12, 'fmt ');                    // Subchunk1ID
+      view.setUint32(16, 16, true);                     // Subchunk1Size (16 for PCM)
+      view.setUint16(20, 1, true);                      // AudioFormat (1 for PCM)
+      view.setUint16(22, numOfChan, true);              // NumChannels
+      view.setUint32(24, sampleRate, true);             // SampleRate
+      view.setUint32(28, byteRate, true);               // ByteRate
+      view.setUint16(32, blockAlign, true);             // BlockAlign
+      view.setUint16(34, bitsPerSample, true);          // BitsPerSample
+      
+      // 3. "data" sub-chunk
+      writeString(view, 36, 'data');                    // Subchunk2ID
+      view.setUint32(40, dataSize, true);               // Subchunk2Size
+      
+      // 4. 寫入交錯的音訊樣本數據
       // 獲取所有通道數據
-      const channelData = [];
+      const channels = [];
       for (let i = 0; i < numOfChan; i++) {
-        channelData.push(buffer.getChannelData(i));
+        channels.push(buffer.getChannelData(i));
       }
       
       // 交錯方式寫入 PCM 數據
       let offset = 44;
       let sample = 0;
       
+      // 確保正確處理每個樣本
       for (let i = 0; i < buffer.length; i++) {
         for (let channel = 0; channel < numOfChan; channel++) {
-          sample = Math.max(-1, Math.min(1, channelData[channel][i]));
-          sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          // 將 -1.0 ~ 1.0 的浮點數映射到 -32768 ~ 32767 的整數
+          sample = Math.max(-1, Math.min(1, channels[channel][i]));
+          sample = Math.round(sample < 0 ? sample * 0x8000 : sample * 0x7FFF);
           view.setInt16(offset, sample, true);
           offset += 2;
         }
